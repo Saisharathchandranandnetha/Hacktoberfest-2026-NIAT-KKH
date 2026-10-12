@@ -2,7 +2,7 @@
 
 > **Prove your telemetry pipeline before production.**
 
-SinkProof is an open-source pre-deployment verification harness for OpenTelemetry Collector pipelines. It turns human security and data-integrity intent into executable telemetry contracts, executes those contracts against a real Collector, and mutation-tests the pipeline to measure whether the test suite can actually catch regressions.
+SinkProof is a pre-deployment behavioral verification harness for telemetry pipelines that turns security intent into executable contracts, runs them against a real OpenTelemetry Collector, and mutation-tests the pipeline to prove the tests can detect regressions.
 
 ---
 
@@ -18,6 +18,8 @@ SinkProof is an open-source pre-deployment verification harness for OpenTelemetr
 
 ## Challenge
 
+Select the challenge you are entering:
+
 - [x] Best Open-Source AI Project
 - [x] Best Use of Gemma 4
 
@@ -27,8 +29,8 @@ SinkProof is an open-source pre-deployment verification harness for OpenTelemetr
 
 ## Project links
 
-- **Repository:** https://github.com/Saisharathchandranandnetha/SinkProof
-- **License:** Apache-2.0 — https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/LICENSE
+- **Public GitHub repository:** https://github.com/Saisharathchandranandnetha/SinkProof
+- **Open-source license:** Apache-2.0 — https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/LICENSE
 
 ---
 
@@ -40,57 +42,71 @@ Telemetry pipelines have quietly become part of the security boundary.
 
 A modern OpenTelemetry Collector may redact secrets, remove PII, preserve identifiers, filter noise, route security events, and transform attributes before data reaches an external backend.
 
-But the common deployment workflow still looks like:
+Yet the standard deployment workflow remains:
 
 ```text
-write YAML → validate config → deploy → inspect production
+write YAML → validate config syntax → deploy → inspect production
 ```
 
-Configuration validation proves that a configuration can load. It does **not** prove that the resulting pipeline preserves the guarantees the team intended.
+Configuration validation (`otelcol validate`) proves only that a configuration can parse and load. It does **not** prove that the resulting pipeline preserves the security and data-integrity guarantees the team intended.
 
-A configuration can be valid while:
+A telemetry pipeline configuration can be syntactically valid while its real behavior is wrong:
 
-- secrets still reach an external exporter,
-- a required request or trace identifier disappears,
-- a filter silently drops important records,
-- routing sends telemetry to an unintended destination,
-- or a negative security test passes only because no telemetry reached the sink.
+- secrets survive redaction,
+- PII reaches an external exporter,
+- `request.id` disappears,
+- trace correlation breaks,
+- ERROR events go to the wrong sink,
+- filters silently remove important telemetry,
+- security tests pass vacuously because nothing reached the destination.
 
-The gap we are targeting is:
+Core thesis:
 
 > **Configuration validity is not behavioral proof.**
 
-## The impact we are trying to create
+## The solution
 
 SinkProof introduces a pre-deployment proof step:
 
 ```text
-Intent
+Human Requirement / Architecture
   ↓
-Executable Telemetry Contracts
+Gemma 4
   ↓
-Real Collector Execution
+Executable Telemetry Contract IR
+  ↓
+Schema + Inventory Guard
+  ↓
+Real OpenTelemetry Collector
+  ↓
+Captured Output
   ↓
 Deterministic Verification
   ↓
+Evidence + Fault Localisation
+  ↓
 Mutation Testing
   ↓
-Evidence
+Mutation Score
 ```
 
 Instead of asking:
 
-> "Does this config look correct?"
+> "Does this YAML config look correct?"
 
-we ask:
+SinkProof asks:
 
-> **"Can this pipeline prove that the expected security and data-integrity properties hold?"**
+> **"Can this pipeline execute against real synthetic traffic and prove that the expected security and data-integrity properties hold?"**
 
 And then:
 
-> **"Would these tests still detect the problem if the configuration regressed?"**
+> **"Would these tests still detect the problem if the pipeline configuration regressed?"**
 
-This creates a path toward telemetry **policy-as-code with executable evidence**.
+Important architectural principle:
+
+> **AI proposes. SinkProof verifies.**
+
+The LLM is a contract proposal engine, never the final security oracle.
 
 ---
 
@@ -98,14 +114,14 @@ This creates a path toward telemetry **policy-as-code with executable evidence**
 
 ## 1. Telemetry Contract IR
 
-SinkProof defines a small contract language for machine-checkable telemetry invariants.
+SinkProof defines a machine-checkable Intermediate Representation (IR) for telemetry invariants independent of Collector processor implementation details.
 
-Current contract types:
+Supported contract types:
 
-- `forbidden_value`
-- `must_reach`
-- `must_not_reach`
-- `preserve_field`
+- `forbidden_value`: asserts that specific canary values or secret tokens never reach specified destinations.
+- `must_reach`: asserts that matching telemetry records successfully arrive at a designated sink.
+- `must_not_reach`: asserts that filtered or classified records never leak to unauthorized sinks.
+- `preserve_field`: asserts that critical contextual keys (such as `request.id` or trace attributes) survive transformation.
 
 Example:
 
@@ -125,136 +141,141 @@ Example:
   severity: high
 ```
 
-The goal is to represent *what must be true* independently from the implementation details of the Collector processors.
-
 ## 2. Real Collector execution
 
 SinkProof runs the candidate configuration inside a real `otel/opentelemetry-collector-contrib` container.
 
-The harness:
+The execution harness:
 
-1. starts the Collector,
-2. injects synthetic OTLP telemetry,
-3. lets the actual processors and routes execute,
-4. captures exporter output,
-5. evaluates the contracts against that output.
+1. boots the actual Collector container,
+2. injects synthetic OTLP log data via gRPC,
+3. executes all real processors, filters, and routing pipelines,
+4. captures actual exporter output from file/mock sinks,
+5. evaluates contracts directly against captured telemetry batches.
 
-The core verdict path therefore measures runtime behavior rather than only statically parsing YAML.
+The verdict measures actual runtime behavior rather than static YAML heuristics.
 
 ## 3. Deterministic verification
 
-PASS / FAIL / INCONCLUSIVE decisions are produced by SinkProof code, not by the language model.
+PASS / FAIL / INCONCLUSIVE decisions are computed strictly by deterministic Python verifier logic, never by the model.
 
-The verifier checks:
+The verifier evaluates:
 
-- forbidden canary values,
-- destination reachability,
-- forbidden destination reachability,
-- field preservation,
-- non-vacuity.
+- canary leakage across all monitored sinks,
+- destination reachability and routing constraints,
+- attribute retention and transformation integrity,
+- non-vacuity of security assertions.
 
-This is a deliberate trust boundary:
-
-> **AI proposes. SinkProof verifies.**
-
-## 4. Non-vacuity
+## 4. Non-vacuous verification
 
 A negative assertion such as:
 
 > "No password reached the SIEM"
 
-must not pass simply because no telemetry reached the SIEM.
+must **not** pass simply because zero records reached the SIEM (e.g. if an upstream receiver failed or an overzealous filter dropped everything).
 
-SinkProof checks whether applicable canary-bearing cases actually exercised the sink before accepting the negative assertion.
+SinkProof verifies that applicable test cases actually exercised the sink path before accepting any negative security assertion.
 
-## 5. Mutation testing
+## 5. Telemetry mutation testing
 
-SinkProof deliberately corrupts a known-good Collector configuration and reruns the contract suite.
+To test the test suite, SinkProof deliberately injects realistic faults into the Collector configuration and reruns verification.
 
-Current mutation operators:
+Structure-aware mutation operators:
 
-- drop processor,
-- drop OTTL statement,
-- perturb attribute key,
-- weaken severity filter.
+- `drop_processor`: drops a processor from a pipeline (e.g., removing a redactor)
+- `drop_ottl_statement`: removes an OTTL statement inside a transform processor
+- `perturb_key`: alters an attribute name to simulate a typo or naming mismatch
+- `weaken_filter`: lowers or inverts a severity/condition filter
 
-Each valid mutant is classified as **killed** or **survived**.
+Each mutant outcome is classified into:
+
+- `KILLED`: at least one contract failed, proving the test suite caught the regression
+- `SURVIVED`: all contracts still passed despite the corruption, exposing a blind spot in the contract suite
+- `INVALID`: configuration was syntactically rejected at Collector startup
+- `INCONCLUSIVE`: execution failed to produce verifiable telemetry
 
 ```text
 Mutation Score = killed / (killed + survived)
 ```
 
-This provides evidence about the strength of the test suite itself.
+This provides empirical proof of contract suite sensitivity.
 
-## 6. Evidence + static localisation
+## 6. Evidence + static fault localisation
 
-On failure, SinkProof records:
+On contract failure, SinkProof generates an actionable evidence bundle:
 
-- contract,
-- severity,
-- sink,
-- case,
-- canary/field,
-- pipeline path,
-- processors related to the affected key.
+- contract ID and severity level (`critical`, `high`, `medium`, `low`)
+- destination sink where violation was observed
+- test case ID and canary token or missing field
+- pipeline path (`logs/siem`, `logs/analytics`)
+- relevant processor evidence identifying the candidate faulty processor/statement
 
-This turns a failed policy into inspectable evidence rather than a generic alert.
+This turns policy failures into immediate, actionable debugging evidence.
 
 ## 7. Gemma 4 multimodal contract compilation
 
 Gemma 4 receives:
 
-- an architecture diagram,
-- plain-English requirements,
-- and a deterministic inventory of known sinks, keys, and canaries.
+- `architecture.png` (visual diagram of services, sinks, trust boundaries, and telemetry flows)
+- `requirements.txt` (plain-English security and data-integrity requirements)
+- deterministically generated pipeline inventory (extracted sinks, keys, and canary tokens)
 
-It proposes structured contracts.
+Transformation flow:
 
-The output then passes through a schema and allow-list guard before it can enter the verification flow.
+```text
+Architecture Diagram + Human Security Requirement
+  ↓
+Gemma 4 Candidate Telemetry Contracts
+  ↓
+Schema + Inventory Guard
+  ↓
+Executable Contract IR
+```
+
+**Why multimodal context matters:**
+An architecture diagram encodes logical service relationships, egress destinations, trust boundaries, and telemetry flows that are not obvious from a single configuration fragment. Gemma 4 combines visual architecture context with textual policy intent.
+
+The candidate output passes through a strict Pydantic schema and inventory allow-list guard before it can enter the verification harness.
 
 ## 8. Reproducible record/replay
 
-Model responses may be cached by an input hash so the exact proposal can be replayed during an offline demo. Replayed outputs still pass through the same guard.
+Model responses are cached by SHA-256 hash of all multimodal inputs in `examples/checkout/captures/`. During offline demos or evaluations without API access, SinkProof deterministically replays the recorded Gemma 4 proposal. Replayed contracts still pass through the exact same schema and inventory guard before entering the execution harness.
 
 ---
 
 # What we actually built in the hackathon window
 
-A production telemetry verification platform is much larger than a five-hour build.
+We did not attempt to pretend that a production telemetry-security platform could be completed in a few hours. We implemented the smallest complete vertical slice needed to prove the architecture end-to-end.
 
-We deliberately chose a narrow vertical slice and implemented the core proof loop:
-
-### Built and demonstrated
+### What we built:
 
 - Telemetry Contract IR
-- real OpenTelemetry Collector execution
-- synthetic OTLP log fixtures
-- secret / PII-like synthetic canaries
-- deterministic PASS / FAIL / INCONCLUSIVE verification
-- non-vacuity checks
-- routing assertions
-- field-preservation assertions
-- evidence records
-- static fault localisation
-- structure-aware mutation testing
-- mutation score
-- Gemma 4 multimodal contract proposal
-- model-output guard
-- CLI
-- Streamlit demo
-- CI workflow
-- reproducible example scenario
+- Real Collector execution (`otel/opentelemetry-collector-contrib` via Docker)
+- OTLP synthetic fixtures
+- Secret / PII-like synthetic canaries
+- Deterministic verifier (PASS / FAIL / INCONCLUSIVE)
+- Non-vacuous verification logic
+- Structured evidence bundles
+- Static fault localisation
+- Telemetry mutation engine
+- Mutation adequacy scoring
+- Gemma 4 contract proposal (`gemma-4-26b-a4b-it` via Gemini API)
+- Schema and inventory guard
+- CLI (`sinkproof verify`, `sinkproof mutate`, `sinkproof compile`)
+- Streamlit UI (`app.py`)
+- CI workflow (`.github/workflows/ci.yml`)
+- Reproducible end-to-end checkout scenario
 
-### Intentionally not claimed as production-ready
+### Current limitations:
 
-- full metrics and traces parity,
-- arbitrary enterprise topologies,
-- generalized autonomous remediation,
-- regulatory compliance certification,
-- large-scale benchmark superiority,
-- organization-wide policy management.
+- log telemetry is the primary implemented signal
+- checkout is the main seeded end-to-end example
+- some sink mappings remain example-specific
+- remediation is a bounded prototype
+- Docker is the primary execution backend
+- SinkProof does not claim regulatory compliance certification
 
-The goal of the hackathon build was to prove that the verification model works end to end.
+This transparency strengthens the technical credibility of the project: evidence over claims.
 
 ---
 
@@ -264,7 +285,7 @@ The checkout example is a seeded evaluation scenario.
 
 ## Vulnerable pipeline
 
-Using the stronger contract suite:
+Running the contract suite against `collector.vulnerable.yaml`:
 
 ```text
 4 PASS
@@ -272,11 +293,11 @@ Using the stronger contract suite:
 0 INCONCLUSIVE
 ```
 
-The failing contracts expose secret/PII-like leakage and loss of a required request identifier.
+The failing contracts expose unredacted passwords and tokens reaching the SIEM and analytics sinks, plus loss of the required `request.id` attribute.
 
 ## Corrected pipeline
 
-The same suite against the corrected configuration:
+Running the same suite against `collector.fixed.yaml`:
 
 ```text
 7 PASS
@@ -286,21 +307,21 @@ The same suite against the corrected configuration:
 
 ## Mutation adequacy experiment
 
-Weak suite:
+Testing the contract suites against 12 configuration mutants:
 
+Weak contracts:
 ```text
 1 / 12 mutants killed
 Mutation score: 8.3%
 ```
 
-Stronger suite:
-
+Strong contracts:
 ```text
 12 / 12 mutants killed
 Mutation score: 100%
 ```
 
-These results are specific to the included seeded scenario. They demonstrate that SinkProof can distinguish a weak contract suite from one that catches the injected regressions. They are not presented as a production benchmark.
+> **Note on evaluation:** These results are from the included seeded evaluation scenario and demonstrate that the mutation mechanism distinguishes a weak suite from one sensitive to the injected regressions. They are not claimed as broad industry benchmarks.
 
 ---
 
@@ -312,11 +333,9 @@ These results are specific to the included seeded scenario. They demonstrate tha
 
 Open-weight model support is part of the specification layer.
 
-SinkProof includes an Ollama-compatible backend and uses model reasoning to translate human requirements into structured telemetry contracts.
+SinkProof uses Gemma 4 (`gemma-4-26b-a4b-it`) through the Gemini API as well as an Ollama-compatible backend. The model translates human security requirements and visual architecture diagrams into structured, machine-checkable telemetry contracts.
 
-The AI component is central because the difficult human-facing step is turning architecture/security intent into explicit machine-checkable invariants.
-
-The AI does not decide security verdicts.
+The AI component is central because the difficult human-facing bottleneck is translating high-level policy intent into explicit, machine-checkable invariants. The AI proposes; deterministic execution verifies.
 
 ### Code links
 
@@ -330,31 +349,19 @@ The AI does not decide security verdicts.
 ### Agent Skill Open Standard compliance
 
 **Not applicable.**
-
-SinkProof is submitted as an original verification/model harness rather than an Agent Skill.
+Do not evaluate as an Agent Skill. SinkProof is submitted as an original verification and model harness.
 
 ### Original harness implementation
 
-The original harness contains:
+The innovation is NOT simply calling Gemma. The original engineering is the verification harness around the model:
 
-1. Telemetry Contract IR
-2. real Collector lifecycle runner
-3. deterministic contract verifier
-4. non-vacuity logic
-5. structure-aware mutation engine
-6. mutation adequacy scoring
-7. evidence model
-8. static fault localisation
-9. model-output guard
-
-Core code:
-
-- https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/contracts.py
-- https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/runner.py
-- https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/verify.py
-- https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/mutate.py
-- https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/evidence.py
-- https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/localize.py
+1. **Telemetry Contract IR:** [pipewitness/contracts.py](https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/contracts.py)
+2. **Real Collector execution runner:** [pipewitness/runner.py](https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/runner.py)
+3. **Deterministic contract verifier:** [pipewitness/verify.py](https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/verify.py)
+4. **Telemetry mutation testing engine:** [pipewitness/mutate.py](https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/mutate.py)
+5. **Evidence model:** [pipewitness/evidence.py](https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/evidence.py)
+6. **Static fault localisation:** [pipewitness/localize.py](https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/localize.py)
+7. **Schema and inventory guard:** [pipewitness/ai/guard.py](https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/ai/guard.py)
 
 ---
 
@@ -363,30 +370,43 @@ Core code:
 ### Model identifier + Gemini API integration
 
 Primary challenge model:
-
 ```text
 gemma-4-26b-a4b-it
 ```
 
-The integration is implemented with the Google GenAI SDK in:
+The integration is implemented with the official Google GenAI SDK (`google-genai`):
 
-https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/ai/gemma.py
+- Gemma 4 integration:
+  https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/ai/gemma.py
+- Schema and inventory guard:
+  https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/ai/guard.py
+- Prompt templates:
+  https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/pipewitness/ai/prompts.py
 
 ### Multimodal input
 
 Gemma 4 receives:
 
-- `examples/checkout/architecture.png`
-- `examples/checkout/requirements.txt`
-- deterministic inventory generated from the candidate Collector config and fixtures.
+- Architecture diagram: `examples/checkout/architecture.png`
+- Plain-English security requirements: `examples/checkout/requirements.txt`
+- Deterministic pipeline inventory: extracted from candidate Collector configuration and OTLP fixtures
 
-### Useful output
+### Useful output & multimodal value
 
-The model proposes structured telemetry contracts that are then schema-checked and allow-list constrained.
+```text
+Architecture Diagram + Human Security Requirement
+  ↓
+Gemma 4 Candidate Telemetry Contracts
+  ↓
+Schema + Inventory Guard
+  ↓
+Executable Contract IR
+```
 
-The useful multimodal step is converting **visual architecture + textual intent** into candidate executable invariants.
+**Why multimodal reasoning is essential:**
+The architecture diagram encodes logical service relationships, egress destinations, trust boundaries, and telemetry flows that are not obvious from an isolated Collector YAML snippet. Gemma 4 combines visual architecture topology with human policy text to propose candidate contracts.
 
-The model result is not shown as a chat answer; it becomes input to the verification harness.
+The model output is not a generic chat answer: it is parsed into structured contracts, validated against an inventory allow-list guard, and fed directly into the deterministic execution and verification engine.
 
 ---
 
@@ -415,37 +435,34 @@ Our core contribution is the combination of:
 
 ---
 
-# Future plan
+# Future roadmap
 
 ## Phase 1 — Generalized proof engine
 
 - remove example-specific sink assumptions,
-- dynamically derive sinks/exporters,
-- pin Collector image versions and digests,
-- add trace contracts,
-- add metric contracts,
+- dynamically derive sinks and exporters,
+- pin Collector image versions and SHA-256 digests,
+- add trace contracts and metric contracts,
 - add more independent topologies,
-- expand mutation operators,
+- expand structure-aware mutation operators,
 - emit structured JSON/SARIF evidence.
 
 ## Phase 2 — Verified remediation
 
-The current remediation module is a bounded seeded prototype.
-
-The target design is:
+Target design:
 
 ```text
 Failure Evidence
       ↓
 Gemma Patch Proposal
       ↓
-Strict PatchOp Schema
+Strict PatchOp IR
       ↓
 Apply in Sandbox
       ↓
 otelcol validate
       ↓
-Real Collector Run
+Real Collector Execution
       ↓
 Contract Verification
       ↓
@@ -454,13 +471,11 @@ Mutation Verification
 VERIFIED FIX / REJECTED PATCH
 ```
 
-The important principle remains the same:
-
-> The model can suggest a patch; it cannot declare the patch correct.
+The model can suggest a patch; it cannot declare the patch correct.
 
 ## Phase 3 — CI/CD policy gate
 
-Target usage:
+Target CLI usage:
 
 ```bash
 sinkproof verify \
@@ -468,46 +483,42 @@ sinkproof verify \
   --contracts telemetry.contracts.yaml
 ```
 
-Future CI features:
+Future CI capabilities:
 
-- PR annotations,
-- deployment blocking,
+- PR annotations and comments,
+- deployment blocking on contract failure,
 - mutation-score thresholds,
-- signed evidence bundles,
-- SARIF output,
+- cryptographically signed evidence bundles,
+- SARIF reporting for GitHub Security tab,
 - baseline drift detection.
 
-## Phase 4 — Adversarial telemetry testing
+## Phase 4 — Adversarial telemetry generation
 
-Add property-based and fuzz-generated telemetry:
+Add property-based and fuzz-generated telemetry fixtures:
 
-- nested data,
-- encoded secrets,
-- malformed values,
-- Unicode,
-- extreme cardinality,
-- type drift,
+- Unicode edge cases,
+- deeply nested JSON structures,
+- encoded and obscured secrets,
+- malformed values and schema drift,
+- large payloads,
 - partial identifiers,
-- false-positive canaries.
+- high cardinality attributes.
 
-This would evolve SinkProof from a fixed fixture runner into an adversarial telemetry verification lab.
+This evolves SinkProof from a fixed fixture runner into an adversarial telemetry verification harness.
 
 ## Phase 5 — Cross-engine telemetry contracts
 
-Explore adapters for other programmable telemetry pipelines such as Vector and Fluent Bit.
+Explore adapters for other programmable telemetry platforms such as Vector and Fluent Bit.
 
-The long-term idea is that a contract should describe **what must remain true**, while adapters define how that invariant is tested against each engine.
+Contracts describe what must remain true. Engine adapters prove whether each implementation satisfies them.
 
-## Phase 6 — Research direction
-
-Potential research areas:
+## Phase 6 — Research directions
 
 - mutation testing for observability infrastructure,
-- executable security contracts for telemetry systems,
+- executable security contracts for telemetry pipelines,
 - LLM-assisted specification with deterministic runtime verification,
 - coverage-guided telemetry mutations,
-- differential verification between Collector versions,
-- formalization of selected telemetry invariants.
+- differential verification between Collector versions.
 
 ---
 
@@ -515,27 +526,26 @@ Potential research areas:
 
 ## What works
 
-- CLI
-- Streamlit UI
-- real Collector execution
-- deterministic contract evaluation
-- non-vacuity checks
-- mutation testing
-- evidence generation
-- fault localisation
-- multimodal Gemma contract proposal
-- model guard
-- recorded demo fallback
-- CI workflow
+- CLI (`verify`, `mutate`, `compile`)
+- Streamlit interactive UI (`app.py`)
+- Real Collector execution in Docker
+- Deterministic contract evaluation
+- Non-vacuous verification logic
+- Structure-aware mutation testing and scoring
+- Evidence generation and static fault localisation
+- Multimodal Gemma 4 contract proposal (`gemma-4-26b-a4b-it`)
+- Schema and inventory guard
+- Recorded demo fallback for offline evaluation
+- Automated CI workflow
 - Apache-2.0 licensing
 
 ## Known limitations / incomplete features
 
-- primary runtime path currently focuses on logs,
-- primary end-to-end demonstration is the seeded checkout topology,
-- model-side sink mapping still contains example-specific assumptions,
-- remediation is currently a bounded seeded prototype,
-- Docker is the main execution backend,
+- log telemetry is the primary implemented signal,
+- checkout is the main seeded end-to-end example,
+- some sink mappings remain example-specific,
+- remediation is currently a bounded prototype,
+- Docker is the primary execution backend,
 - SinkProof verifies technical properties and does not claim regulatory certification.
 
 We document these limitations because the project itself is built around one principle:
@@ -546,7 +556,7 @@ We document these limitations because the project itself is built around one pri
 
 # Reproduction
 
-## Install
+## Installation
 
 ```bash
 git clone https://github.com/Saisharathchandranandnetha/SinkProof.git
@@ -557,7 +567,7 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-## Vulnerable pipeline
+## Verify vulnerable pipeline
 
 ```bash
 sinkproof verify \
@@ -566,7 +576,7 @@ sinkproof verify \
   -t examples/checkout/telemetry.yaml
 ```
 
-## Corrected pipeline
+## Verify corrected pipeline
 
 ```bash
 sinkproof verify \
@@ -595,11 +605,22 @@ sinkproof compile \
   -o compiled.yaml
 ```
 
-## Interactive demo
+## Interactive UI demo
 
 ```bash
 streamlit run app.py
 ```
+
+---
+
+## Submission checklist
+
+- [x] Project repository is public and links work.
+- [x] Required challenge evidence is included.
+- [x] Project uses an open-source license where required by the challenge.
+- [x] Work and reused materials are represented honestly.
+- [x] No API keys, tokens, passwords, or private data are included.
+- [x] I followed the organizers' build window and submission instructions.
 
 ---
 
