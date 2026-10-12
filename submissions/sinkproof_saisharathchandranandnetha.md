@@ -31,6 +31,7 @@ Select the challenge you are entering:
 
 - **Public GitHub repository:** https://github.com/Saisharathchandranandnetha/SinkProof
 - **Open-source license:** Apache-2.0 — https://github.com/Saisharathchandranandnetha/SinkProof/blob/main/LICENSE
+- **Demo & supporting materials:** https://drive.google.com/drive/folders/1biwFHfSvOEO4fLZluHslEvkQuul63nsk?usp=drive_link
 
 ---
 
@@ -610,6 +611,8 @@ sinkproof compile \
 ```bash
 streamlit run app.py
 ```
+
+> **Demo walkthrough & presentation files:** [Google Drive Demo Folder](https://drive.google.com/drive/folders/1biwFHfSvOEO4fLZluHslEvkQuul63nsk?usp=drive_link)
 
 ---
 
